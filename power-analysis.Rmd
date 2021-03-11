@@ -1,0 +1,267 @@
+---
+title: "Power analyses and simulations in R"
+author: "Andrew Jessop"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: 
+  html_document:
+    theme: united
+    highlight: haddock
+    toc: true
+    toc_depth: 4
+    toc_float: true
+    number_sections: false
+    df_print: paged
+    self_contained: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+```{css, echo = FALSE}
+
+pre, code {white-space:pre !important; overflow-x:scroll !important}
+
+```
+
+```{r, include=FALSE}
+
+options(width=70)
+options(contrasts=c("contr.helmert","contr.poly")) 
+options(warn = -1)
+knitr::opts_chunk$set(echo=TRUE, tidy = TRUE,
+                      size="small", rows.print=20,
+                      dpi=300, comment = "")
+
+```
+
+# Setup
+
+```{r}
+
+# Load in packages needed to run the power analysis
+library(tidyverse)
+library(pwr)
+library(simr)
+
+```
+
+The first thing we need to do is set the seed number so that the results can be replicated.
+
+```{r}
+
+set.seed(1)
+
+```
+
+## Pearson's correlations
+
+# Scenario 1
+
+```{r}
+
+pwr.r.test(n = NULL,
+           r = 0.3,
+           power = 0.8,
+           sig.level = 0.05,
+           alternative = "two.sided")
+
+```
+
+# Scenario 2
+
+```{r}
+
+pwr.r.test(n = NULL,
+           r = 0.2,
+           power = 0.8,
+           sig.level = 0.05,
+           alternative = "two.sided")
+
+```
+
+# Scenario 3
+
+```{r}
+
+pwr.r.test(n = 200,
+           r = 0.2,
+           power = NULL,
+           sig.level = 0.05,
+           alternative = "two.sided")
+
+```
+
+
+# Scenario 4 
+
+```{r}
+
+pwr.r.test(n = NULL,
+           r = 0.25,
+           power = 0.8,
+           sig.level = 0.001,
+           alternative = "two.sided")
+
+```
+
+
+# Scenario 5 
+
+```{r}
+
+pwr.r.test(n = NULL,
+           r = 0.25,
+           power = 0.95,
+           sig.level = 0.001,
+           alternative = "two.sided")
+
+```
+
+# Scenario 6
+
+```{r}
+
+pwr.r.test(n = NULL,
+           r = 0.25,
+           power = 0.95,
+           sig.level = 0.001,
+           alternative = "greater")
+
+```
+
+
+# Mixed Effects Model
+
+## Vocab and RTs
+
+```{r}
+
+# Load in data from pilot or previous study with similar design
+pilot <- read.csv("data/vocab_rt.csv")
+
+# Check the data set
+pilot %>% 
+  group_by(age) %>%
+  summarise(mean=mean(vocab), sd=sd(vocab), n=length(vocab))
+
+# Set up factors
+pilot$subject <- factor(pilot$subject)
+
+# Fit a maximal model
+rt_lmer <- lmer(vocab ~ rt + (1 |subject), pilot,
+                control=lmerControl(optimizer = "nloptwrap", calc.derivs = FALSE),
+                REML = FALSE)
+summary(rt_lmer)
+
+# Calculate power at the current sample size
+powerSim(rt_lmer, nsim=100)
+
+# Set the effect size of interest
+fixef(rt_lmer)["rt"] <- -0.2
+
+# Calculate power at the current sample size
+powerSim(rt_lmer, nsim=100)
+
+# Add more observations within each subject
+rt_lmer2 <- extend(rt_lmer, within="subject", n=12)
+
+# Calculate power with 10 age measures
+powerSim(rt_lmer2, nsim=100)
+
+# Calculate the sample size needed for 80% power 
+power_curve <- powerCurve(rt_lmer2, within="subject", breaks=1:12, nsim=100)
+print(power_curve)
+plot(power_curve)
+
+# Add more subjects
+nlevels(pilot$subject)
+rt_lmer3 <- extend(rt_lmer, along="subject", n=200)
+
+# Calculate power with 10 age measures
+powerSim(rt_lmer3, nsim=100)
+
+# Calculate the sample size needed for 80% power 
+power_curve <- powerCurve(rt_lmer3, along="subject", breaks=seq(60, 200, 10), nsim=100)
+print(power_curve)
+plot(power_curve)
+
+```
+
+## Priming experiment
+
+```{r}
+
+# Load in data pilot study data
+prime <- read.csv("data/prime.csv")
+
+# Check the data set
+prime %>% 
+  group_by(prime) %>%
+  summarise(mean=mean(passive), sd=sd(passive), n=length(passive))
+
+# Set up factors
+prime$subject <- factor(prime$subject)
+prime$item <- factor(prime$item)
+prime$prime_str <- ifelse(prime$prime == "passive", 0.5, -0.5)
+prime
+
+# Check the number of subjects and items
+nlevels(prime$subject)
+nlevels(prime$item)
+
+# Fit a maximal model
+prime_glmer <- glmer(passive ~ prime_str + (1 |subject) + (1 |item),
+                     prime, family="binomial",
+                     control=glmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+summary(prime_glmer)
+
+# Set the effect size of interest
+fixef(prime_glmer)["prime_str"] <- 0.4
+
+# Calculate observed power
+powerSim(prime_glmer, nsim=100)
+
+# Add more items to the design
+nlevels(prime$item)
+prime_glmer2 <- extend(prime_glmer, along="item", n=40)
+
+# Calculate new power level
+powerSim(prime_glmer2, nsim=100)
+
+# Add more subjects
+nlevels(prime$subject)
+prime_glmer3 <- extend(prime_glmer2, along="subject", n=400)
+
+# Calculate power with 10 age measures
+powerSim(prime_glmer3, nsim=100)
+
+# Calculate the sample size needed for 80% power 
+power_curve <- powerCurve(prime_glmer3, along="subject",
+                          breaks=seq(100, 400, 20), nsim=100)
+print(power_curve)
+plot(power_curve)
+
+# Fit a model with maximal random slopes
+prime_glmer <- glmer(passive ~ prime_str + (1 + prime_str|subject) + (1 + prime_str|item),
+                     prime, family="binomial",
+                     control=glmerControl(optimizer = "nloptwrap", calc.derivs = FALSE))
+
+# Set up power parameters
+fixef(prime_glmer)["prime_str"] <- 0.4
+prime_glmer2 <- extend(prime_glmer, along="item", n=40)
+prime_glmer3 <- extend(prime_glmer2, along="subject", n=400)
+
+# Calculate the sample size needed for 80% power 
+power_curve <- powerCurve(prime_glmer3, along="subject",
+                          breaks=seq(100, 400, 20), nsim=100)
+print(power_curve)
+plot(power_curve)
+
+```
+
+# Appendix
+
+```{r}
+
+sessionInfo()
+
+```
